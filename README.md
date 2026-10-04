@@ -1,41 +1,26 @@
 # Motion Studio image builder
 
-ชุดสร้าง Docker image สำหรับเว็บ Motion Studio แบบอัปโหลดรูปภาพและวิดีโอสองไฟล์
+ชุดสร้าง Docker image สำหรับ Motion Studio แบบอัปโหลดภาพและวิดีโอสองไฟล์
+โค้ดและภาพอิมเมจเท่านั้น ไม่มีรูป คลิปส่วนตัว API key หรือ model weights ใน repository
 
-## ไฟล์ที่เผยแพร่
+เปิด repository แบบ Public เพื่อใช้ standard GitHub-hosted runner โดยไม่มีค่าเวลาสร้าง
+Workflow ทำงานเมื่อกด Actions → Build Motion Studio image → Run workflow เท่านั้น
+ไม่สร้างหรือเช่า RunPod และไม่ใช้ RunPod API key ใน GitHub
+GitHub ให้ GITHUB_TOKEN ชั่วคราวกับ workflow เพื่อเผยแพร่ image ไป GHCR โดยอัตโนมัติ
 
-ซอร์ส 50 ไฟล์อยู่ใน [motion-studio-source.zip](motion-studio-source.zip) พร้อมรายการ SHA-256 ของแต่ละไฟล์ ไม่มีรูป วิดีโอส่วนตัว API key หรือ model weights รวมอยู่ในชุดนี้
+เมื่อ build สำเร็จ ดูชื่อ ghcr.io/บัญชี/repository@sha256:... ใน Job summary
+GitHub อาจตั้ง package ใหม่เป็น Private ต้องเปลี่ยน Package settings → Change visibility → Public
+ก่อนให้ RunPod ดึง image โดยไม่มี registry credentials
+จากนั้นใช้ชื่อพร้อม digest ใน Template ของ RunPod ที่ Motion Studio แสดง
 
-SHA-256 ของ ZIP: `bad9adecc445e35c81d5e626d7b143fa7435b4fedeb2b7a59fa02f1ff6deac74`
+ComfyUI ถูกตรึงไว้ที่ f1072eb0350638a3390ddb6afbcaa8c6b237c6fd
+PyTorch 2.9.1 / CUDA 12.8 runtime image ถูกตรึง digest จาก registry ทางการ
+Native node source check ผ่าน แต่ยังไม่ได้ทดสอบ GPU กับรุ่นนี้
+ผู้ใช้เช่าและเชื่อม Pod เอง สร้างต่อเนื่องบนเครื่องเดิม และ Stop / Terminate เอง
+ไม่มี provider API, account API key หรือคำสั่งหยุดและลบเครื่องในระบบที่เผยแพร่
+โมเดลประมาณ 59GB จะดาวน์โหลดและตรวจ checksum เมื่อเปิด Pod ใหม่
+PC ต้องออนไลน์จนบันทึกวิดีโอและหลักฐานครบ แล้วผู้ใช้ตรวจไฟล์ก่อนลบ Pod
 
-## สร้าง image
-
-1. เปิด Actions → Build Motion Studio image → Run workflow
-2. งานจะตรวจแฮช แตกซอร์ส ตรวจ dependency และสร้าง Docker image บน runner มาตรฐานของ GitHub
-3. เมื่อสำเร็จ ชื่อ `ghcr.io/itmethx-bot/motion-studio-image@sha256:...` จะแสดงใน Job summary
-4. ตั้ง Package settings → Change visibility → Public เพื่อให้ RunPod ดาวน์โหลดได้โดยไม่ต้องมี registry credentials
-5. ใส่ชื่อ image พร้อม digest ใน Motion Studio ที่รันบน PC แล้วบันทึกการตั้งค่า
-
-GitHub Actions ใช้ GITHUB_TOKEN ชั่วคราวสำหรับเผยแพร่ image ไม่ต้องใส่ RunPod API key บน GitHub งานสร้าง image นี้ไม่สร้าง Pod และไม่ใช้ GPU ของ RunPod
-
-## ข้อจำกัดและสถานะการตรวจสอบ
-
-ComfyUI ถูกตรึง commit `f1072eb0350638a3390ddb6afbcaa8c6b237c6fd` และ PyTorch 2.9.1 / CUDA 12.8 runtime ถูกตรึง digest ของ image ทางการ การตรวจ build บน CPU ไม่ได้ยืนยันคุณภาพวิดีโอ สิทธิ์ RunPod API หรือการ Terminate จริง ต้องทดสอบบน GPU แยกต่างหาก
-
-ระบบตั้งใจสร้าง Pod ใหม่ต่อหนึ่งงานโดยไม่ใช้ Network Volume ดาวน์โหลดและตรวจ checksum ของโมเดลประมาณ 59 GB เมื่อเริ่ม Pod บันทึกวิดีโอและหลักฐานลง PC ก่อน Stop และ Terminate การดาวน์โหลดโมเดลซ้ำอาจใช้เวลาและมีค่าเช่า GPU ระหว่างเตรียมเครื่อง PC ต้องออนไลน์จนบันทึกผลและยืนยันลบ Pod สำเร็จ
-
-ภาพส่วนของร่างกายที่ไม่ปรากฏในรูปอ้างอิงเป็นการประมาณของโมเดล ไม่รับประกันรูปลักษณ์จริง ความถูกต้องทางกายวิภาค หรือผลลัพธ์ที่เหมือนกันสำหรับทุกคลิป
-
-## เอกสารอ้างอิง
-
-- [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
-- [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
-- [RunPod storage](https://docs.runpod.io/pods/storage/types)
-
-## Initial-scene prop filter revision
-
-Only interaction objects with a valid mask in frame zero seed appearance references and layout. Later-only generic object candidates are excluded with an explicit warning; genuine later-entering objects are also unsupported. Source analysis summaries and the failure stage are retained on the PC before automatic Pod cleanup. This is a filtering policy, not semantic object recognition or verified physical contact.
-
-## Source-duration revision
-
-Runtime motion-studio-auto-6-source-duration accepts 1–120 second source videos and produces min(source duration, 10 seconds) at 16 FPS, rounded down to a whole frame. A 5 second source produces exactly 80 frames / 5 seconds. Up to 3 internal conditioning frames satisfy Wan 4n+1 and are discarded by final encoding; outputs are never looped or retimed. CPU timing, orchestration and real MP4 encoding tests passed; GPU generation with this revision remains unverified.
+References:
+- https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry
+- https://docs.github.com/en/billing/concepts/product-billing/github-actions
