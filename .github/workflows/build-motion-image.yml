@@ -1,13 +1,18 @@
 name: Build Motion Studio image
 on:
   workflow_dispatch:
+
 permissions:
   contents: read
+
 concurrency:
   group: motion-studio-image
   cancel-in-progress: false
+
 jobs:
   build:
+    # Standard hosted runners are free for public repositories. Do not execute
+    # builds on a private repository without a separately approved cost plan.
     if: github.event.repository.private == false
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -26,7 +31,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          printf '%s  %s\n' '3c151f1f58c6da8d43d70337ab7d44e80f99f521946a68576ce3710ab60b36b9' 'motion-studio-source.zip' | sha256sum --check
+          printf '%s  %s\n' 'a2ce0c07b64bfb727c7421fbffd5c896f95aade802930f6a97d35c3dd9a61942' 'motion-studio-source.zip' | sha256sum --check
           python3 -m zipfile -e motion-studio-source.zip image-source
       - name: Verify build payload
         run: python3 tools/verify-payload.py
