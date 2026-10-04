@@ -31,7 +31,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          printf '%s  %s\n' 'bad9adecc445e35c81d5e626d7b143fa7435b4fedeb2b7a59fa02f1ff6deac74' 'motion-studio-source.zip' | sha256sum --check
+          printf '%s  %s\n' 'eaaffbbc631faea839eb5d5abc560494b372931ee3b00d0a358c80e1d9095b00' 'motion-studio-source.zip' | sha256sum --check
           python3 -m zipfile -e motion-studio-source.zip image-source
       - name: Verify build payload
         run: python3 tools/verify-payload.py
@@ -61,6 +61,6 @@ jobs:
           [[ "$REFERENCE" =~ ^ghcr.io/.+@sha256:[a-f0-9]{64}$ ]]
           {
             printf '## Motion Studio image\n\n`%s`\n\n' "$REFERENCE"
-            printf 'Build and CPU source checks passed. GPU generation and Pod termination are not yet verified.\n\n'
+            printf 'Build and CPU source checks passed. Manual reusable sessions: only the user stops and terminates Pods. GPU generation is not yet verified for this release.\n\n'
             printf 'New GHCR packages default to private. Set package visibility to Public before using this reference without registry credentials.\n'
           } >> "$GITHUB_STEP_SUMMARY"
