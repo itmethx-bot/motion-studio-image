@@ -31,7 +31,7 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          printf '%s  %s\n' 'eaaffbbc631faea839eb5d5abc560494b372931ee3b00d0a358c80e1d9095b00' 'motion-studio-source.zip' | sha256sum --check
+          printf '%s  %s\n' 'a505ad9d4e2ac2ff12c42a00f193d49b3710e0b98197d0bfc371541ef000e33b' 'motion-studio-source.zip' | sha256sum --check
           python3 -m zipfile -e motion-studio-source.zip image-source
       - name: Verify build payload
         run: python3 tools/verify-payload.py
