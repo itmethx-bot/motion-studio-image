@@ -4,9 +4,9 @@
 
 ## ไฟล์ที่เผยแพร่
 
-ซอร์ส 47 ไฟล์อยู่ใน [motion-studio-source.zip](motion-studio-source.zip) พร้อมรายการ SHA-256 ของแต่ละไฟล์ ไม่มีรูป วิดีโอส่วนตัว API key หรือ model weights รวมอยู่ในชุดนี้
+ซอร์ส 50 ไฟล์อยู่ใน [motion-studio-source.zip](motion-studio-source.zip) พร้อมรายการ SHA-256 ของแต่ละไฟล์ ไม่มีรูป วิดีโอส่วนตัว API key หรือ model weights รวมอยู่ในชุดนี้
 
-SHA-256 ของ ZIP: `a2ce0c07b64bfb727c7421fbffd5c896f95aade802930f6a97d35c3dd9a61942`
+SHA-256 ของ ZIP: `31efe728d23b27f46eb584cf35bd230200637f9eb0bab74bb3aac3b4b413ea3a`
 
 ## สร้าง image
 
@@ -35,3 +35,7 @@ ComfyUI ถูกตรึง commit `f1072eb0350638a3390ddb6afbcaa8c6b237c6fd` 
 ## Initial-scene prop filter revision
 
 Only interaction objects with a valid mask in frame zero seed appearance references and layout. Later-only generic object candidates are excluded with an explicit warning; genuine later-entering objects are also unsupported. Source analysis summaries and the failure stage are retained on the PC before automatic Pod cleanup. This is a filtering policy, not semantic object recognition or verified physical contact.
+
+## Source-duration revision
+
+Runtime motion-studio-auto-6-source-duration accepts 1–120 second source videos and produces min(source duration, 10 seconds) at 16 FPS, rounded down to a whole frame. A 5 second source produces exactly 80 frames / 5 seconds. Up to 3 internal conditioning frames satisfy Wan 4n+1 and are discarded by final encoding; outputs are never looped or retimed. CPU timing, orchestration and real MP4 encoding tests passed; GPU generation with this revision remains unverified.
