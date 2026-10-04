@@ -6,7 +6,7 @@
 
 ซอร์ส 47 ไฟล์อยู่ใน [motion-studio-source.zip](motion-studio-source.zip) พร้อมรายการ SHA-256 ของแต่ละไฟล์ ไม่มีรูป วิดีโอส่วนตัว API key หรือ model weights รวมอยู่ในชุดนี้
 
-SHA-256 ของ ZIP: `3c151f1f58c6da8d43d70337ab7d44e80f99f521946a68576ce3710ab60b36b9`
+SHA-256 ของ ZIP: `a2ce0c07b64bfb727c7421fbffd5c896f95aade802930f6a97d35c3dd9a61942`
 
 ## สร้าง image
 
@@ -31,3 +31,7 @@ ComfyUI ถูกตรึง commit `f1072eb0350638a3390ddb6afbcaa8c6b237c6fd` 
 - [GitHub Container Registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)
 - [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 - [RunPod storage](https://docs.runpod.io/pods/storage/types)
+
+## Initial-scene prop filter revision
+
+Only interaction objects with a valid mask in frame zero seed appearance references and layout. Later-only generic object candidates are excluded with an explicit warning; genuine later-entering objects are also unsupported. Source analysis summaries and the failure stage are retained on the PC before automatic Pod cleanup. This is a filtering policy, not semantic object recognition or verified physical contact.
