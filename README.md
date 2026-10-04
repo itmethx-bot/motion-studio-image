@@ -6,7 +6,7 @@
 
 ซอร์ส 50 ไฟล์อยู่ใน [motion-studio-source.zip](motion-studio-source.zip) พร้อมรายการ SHA-256 ของแต่ละไฟล์ ไม่มีรูป วิดีโอส่วนตัว API key หรือ model weights รวมอยู่ในชุดนี้
 
-SHA-256 ของ ZIP: `31efe728d23b27f46eb584cf35bd230200637f9eb0bab74bb3aac3b4b413ea3a`
+SHA-256 ของ ZIP: `bad9adecc445e35c81d5e626d7b143fa7435b4fedeb2b7a59fa02f1ff6deac74`
 
 ## สร้าง image
 
