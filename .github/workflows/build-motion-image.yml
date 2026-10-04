@@ -1,0 +1,61 @@
+name: Build Motion Studio image
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: motion-studio-image
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: image-source
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify and extract reviewed source archive
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' '3c151f1f58c6da8d43d70337ab7d44e80f99f521946a68576ce3710ab60b36b9' 'motion-studio-source.zip' | sha256sum --check
+          python3 -m zipfile -e motion-studio-source.zip image-source
+      - name: Verify build payload
+        run: python3 tools/verify-payload.py
+      - name: Build and validate image on CPU
+        env:
+          BASE_IMAGE: pytorch/pytorch@sha256:7b324d212a4450795b49edba9949b7cdc72429148a64e974334bfe5774d51385
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          VERSION="build-${GITHUB_SHA}"
+          docker build --platform linux/amd64 --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$IMAGE:$VERSION" container
+          docker run --rm --entrypoint python "$IMAGE:$VERSION" -c \
+            "import sys; sys.path.insert(0,'/opt/motion'); import install_fullgen_addon as a; a.check_comfy('/opt/ComfyUI'); r=a.check_dependencies(); assert r['ready'],r"
+          printf 'IMAGE=%s\nVERSION=%s\n' "$IMAGE" "$VERSION" >> "$GITHUB_ENV"
+      - name: Publish reviewed image to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$VERSION"
+          REFERENCE="$(docker image inspect "$IMAGE:$VERSION" --format '{{index .RepoDigests 0}}')"
+          [[ "$REFERENCE" =~ ^ghcr.io/.+@sha256:[a-f0-9]{64}$ ]]
+          {
+            printf '## Motion Studio image\n\n`%s`\n\n' "$REFERENCE"
+            printf 'Build and CPU source checks passed. GPU generation and Pod termination are not yet verified.\n\n'
+            printf 'New GHCR packages default to private. Set package visibility to Public before using this reference without registry credentials.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
