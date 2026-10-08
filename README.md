@@ -28,3 +28,5 @@ PC ต้องออนไลน์จนบันทึกวิดีโอ�
 References:
 - https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry
 - https://docs.github.com/en/billing/concepts/product-billing/github-actions
+
+Bootstrap recovery revision: resume-diagnostics-20261008. Transient transfers resume verified partial files with at most three attempts. Authorization, full-disk and checksum failures still stop installation. Authenticated status exposes bounded diagnostics without credentials or signed URLs. Local PC controller uses port 8767; Pod service remains on 8188. This release passed 277 CPU regression/recovery checks; GPU generation and the failing Pod recovery are not yet verified.
