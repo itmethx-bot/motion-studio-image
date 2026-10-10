@@ -1,0 +1,59 @@
+name: Build Image Studio Text-to-Image
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: image-studio-text-image
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify reviewed archive and inventory
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' '8bce8a29580c4dad29c597ad8ec08581ae0675c1ac4f8233954db8f6f1c8543f' 'image-studio-source.zip' | sha256sum --check
+          python3 - <<'PY'
+          import hashlib,json,zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('image-studio-source.zip') as z:
+              m=json.loads(z.read('payload-manifest.json'))
+              assert set(z.namelist())==set(m)|{'payload-manifest.json'}
+              for name,sha in m.items():
+                  assert name.startswith('container/') and '..' not in Path(name).parts
+                  assert hashlib.sha256(z.read(name)).hexdigest()==sha
+              z.extractall('image-source')
+          PY
+      - name: Build and run CPU checks
+        env:
+          BASE_IMAGE: pytorch/pytorch@sha256:7b324d212a4450795b49edba9949b7cdc72429148a64e974334bfe5774d51385
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          VERSION="image-studio-${GITHUB_SHA}"
+          docker build --platform linux/amd64 --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$IMAGE:$VERSION" image-source/container
+          docker run --rm --entrypoint python "$IMAGE:$VERSION" -m unittest discover -s /opt/image-studio/tests -v
+          printf 'IMAGE=%s\nVERSION=%s\n' "$IMAGE" "$VERSION" >> "$GITHUB_ENV"
+      - name: Publish image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$VERSION"
+          REFERENCE="$(docker image inspect "$IMAGE:$VERSION" --format '{{index .RepoDigests 0}}')"
+          [[ "$REFERENCE" =~ ^ghcr.io/.+@sha256:[a-f0-9]{64}$ ]]
+          printf '## Image Studio — Text-to-Image\n\n`%s`\n\nCPU tests passed. Qwen-Image FP8 on RunPod. GPU generation on RunPod has not yet been verified. No private media, credentials or model weights in this image.\n' "$REFERENCE" >> "$GITHUB_STEP_SUMMARY"
