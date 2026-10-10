@@ -21,7 +21,7 @@ jobs:
       - name: Verify reviewed archive and inventory
         run: |
           set -euo pipefail
-          printf '%s  %s\n' '8bce8a29580c4dad29c597ad8ec08581ae0675c1ac4f8233954db8f6f1c8543f' 'image-studio-source.zip' | sha256sum --check
+          printf '%s  %s\n' '2363fd6ef46868f65f4fd73c9978f8d5e4beafa21ca0ccdb5279e6fad83958bc' 'image-studio-source.zip' | sha256sum --check
           python3 - <<'PY'
           import hashlib,json,zipfile
           from pathlib import Path
