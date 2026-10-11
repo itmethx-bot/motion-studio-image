@@ -21,7 +21,7 @@ jobs:
       - name: Verify reviewed archive and inventory
         run: |
           set -euo pipefail
-          printf '%s  %s\n' '2363fd6ef46868f65f4fd73c9978f8d5e4beafa21ca0ccdb5279e6fad83958bc' 'image-studio-source.zip' | sha256sum --check
+          printf '%s  %s\n' 'fd9b86f6beec6bebb60237e95a40017a0fc3f399471dc679171ced0606fc7df9' 'image-studio-source.zip' | sha256sum --check
           python3 - <<'PY'
           import hashlib,json,zipfile
           from pathlib import Path
@@ -56,4 +56,4 @@ jobs:
           docker push "$IMAGE:$VERSION"
           REFERENCE="$(docker image inspect "$IMAGE:$VERSION" --format '{{index .RepoDigests 0}}')"
           [[ "$REFERENCE" =~ ^ghcr.io/.+@sha256:[a-f0-9]{64}$ ]]
-          printf '## Image Studio — Text-to-Image\n\n`%s`\n\nCPU tests passed. Qwen-Image FP8 on RunPod. GPU generation on RunPod has not yet been verified. No private media, credentials or model weights in this image.\n' "$REFERENCE" >> "$GITHUB_STEP_SUMMARY"
+          printf '## Image Studio — Text-to-Image\n\n`%s`\n\n27 CPU checks passed. Qwen-Image FP8 and FLUX.1-dev on RunPod, downloaded only when selected. GPU generation on RunPod has not yet been verified. No private media, credentials or model weights in this image.\n' "$REFERENCE" >> "$GITHUB_STEP_SUMMARY"
