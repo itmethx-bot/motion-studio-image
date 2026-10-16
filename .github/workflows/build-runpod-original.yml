@@ -1,0 +1,68 @@
+name: Build RunPod Original Text-to-Image
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: image-studio-runpod-original
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify original source archive
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' 'b63f1a69be14fca38939ead6f5528a2be3ae9a1e6a4800a1f04cc6d0b79a5baa' 'image-studio-runpod-original-source.zip' | sha256sum --check
+          python3 - <<'PYCODE'
+          import hashlib,json,zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('image-studio-runpod-original-source.zip') as archive:
+              manifest=json.loads(archive.read('payload-manifest.json'))
+              assert set(archive.namelist())=={'source/'+name for name in manifest}|{'payload-manifest.json'}
+              for name,checksum in manifest.items():
+                  assert not Path(name).is_absolute() and '..' not in Path(name).parts
+                  assert name not in ('config.env','state.json')
+                  assert hashlib.sha256(archive.read('source/'+name)).hexdigest()==checksum
+              archive.extractall('original-build')
+          PYCODE
+      - name: Check build disk
+        run: |
+          df -h /
+          python3 -c 'import shutil; assert shutil.disk_usage("/").free >= 25*1024**3, "Need at least 25 GiB free for Docker build"'
+      - name: Build original Dockerfile
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          VERSION="runpod-original-${GITHUB_SHA}"
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$IMAGE:$VERSION" original-build/source
+          printf 'IMAGE=%s\nVERSION=%s\n' "$IMAGE" "$VERSION" >> "$GITHUB_ENV"
+      - name: Test original app and launcher offline in Linux container
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python \
+            --mount "type=bind,source=$PWD/original-build/source,target=/test-source,readonly" \
+            --workdir /test-source "$IMAGE:$VERSION" -B -m unittest discover -s tests -p 'test_*.py' -v
+          docker run --rm --entrypoint python "$IMAGE:$VERSION" -c 'import torch,requests,onnxruntime; print("Torch",torch.__version__,"ORT",onnxruntime.__version__)'
+      - name: Publish separately tagged image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$VERSION"
+          REFERENCE="$(docker image inspect "$IMAGE:$VERSION" --format '{{index .RepoDigests 0}}')"
+          [[ "$REFERENCE" =~ ^ghcr.io/.+@sha256:[a-f0-9]{64}$ ]]
+          printf '## Original Text-to-Image RunPod image\n\n`%s`\n\nOriginal source from 14 Oct 2026; CPU checks passed. GPU inference on RunPod still requires verification. No model weights, account API keys, private media or config.env in the image. No RunPod resources created by this workflow.\n' "$REFERENCE" >> "$GITHUB_STEP_SUMMARY"
