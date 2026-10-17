@@ -1,0 +1,138 @@
+name: Repair RunPod Original Model Downloads
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: image-studio-runpod-original
+  cancel-in-progress: false
+jobs:
+  repair:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Verify original archive and prepare reviewed repair source
+        run: |
+          set -euo pipefail
+          python3 - <<'PYCODE'
+          import hashlib,json,re,stat,zipfile
+          from pathlib import Path,PurePosixPath
+          archive_path=Path('image-studio-runpod-original-source.zip')
+          assert hashlib.sha256(archive_path.read_bytes()).hexdigest()=='b63f1a69be14fca38939ead6f5528a2be3ae9a1e6a4800a1f04cc6d0b79a5baa', 'Original archive SHA256 mismatch'
+          expected_paths=set(json.loads(r'''[".dockerignore", ".gitignore", "Dockerfile", "app.py", "build-constraints.txt", "build_nodes.py", "character-requirements.txt", "config.example.env", "core.py", "engine.py", "entrypoint.sh", "extra_model_paths.yaml", "index.html", "install_models.py", "launcher.bat", "launcher.py", "model_catalog.py", "nodes.lock.json", "requirements-app.txt", "runtime_init.py", "tests/test_app_engine.py", "tests/test_install_models.py", "tests/test_launcher.py", "tests/test_runtime_init.py", "tests/test_ui.cjs", "torch-constraints.txt"]'''))
+          protected=json.loads(r'''{"app.py": "ed2103d6cba02e3518a5036ac11d588067f819ae64cffe331b7d1a42b4e9b28f", "core.py": "a97edd93eb3c26711598b0c2601456a38112a69825f46dda00dd5d515aa9fd86", "engine.py": "c6b973854f347933eee90131d78830527c963990b8286299b5ec1f9150c3d8e1", "index.html": "3016e62caf5cad6e19c4b73553a00d00a06201a4272fbdb055e6b1025d061215"}''')
+          with zipfile.ZipFile(archive_path) as archive:
+              names=archive.namelist()
+              assert len(names)==len(set(names)), 'Duplicate archive paths'
+              manifest=json.loads(archive.read('payload-manifest.json'))
+              assert isinstance(manifest,dict) and set(manifest)==expected_paths, 'Original payload manifest paths changed'
+              assert set(names)=={'source/'+name for name in manifest}|{'payload-manifest.json'}, 'Unexpected/missing archive payload'
+              for name,checksum in manifest.items():
+                  relative=PurePosixPath(name)
+                  assert isinstance(name,str) and name and not relative.is_absolute() and not any(p in ('','.','..') for p in name.split('/'))
+                  assert '\\' not in name and ':' not in name and '\x00' not in name
+                  assert re.fullmatch(r'[a-f0-9]{64}',checksum)
+                  assert name not in ('config.env','state.json') and '.private.' not in name
+                  info=archive.getinfo('source/'+name)
+                  assert not info.is_dir() and not stat.S_ISLNK(info.external_attr>>16) and not info.flag_bits&1
+                  assert 0 < info.file_size < 2*1024**2
+                  assert hashlib.sha256(archive.read(info)).hexdigest()==checksum, 'Payload SHA256 mismatch: '+name
+              for name,checksum in protected.items():
+                  assert manifest[name]==checksum, 'Original app manifest mismatch: '+name
+              archive.extractall('repair-build')
+          root=Path('repair-build/source')
+          # คง packaging fix ที่ผ่าน Linux tests แล้ว โดยไม่ rebuild dependency
+          files=json.loads(r'''{"Dockerfile": "# ไม่มีโมเดลหรือ API key ใน image; โมเดลอยู่บน Network Volume เท่านั้น\nARG BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04@sha256:ad6d59a3bbf3e82c1c849c9ac09cfc2a3e0bbb8655042fd899be6681b3fe2a85\nFROM ${BASE_IMAGE}\nUSER root\nENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1 PYTHONUTF8=1 PIP_NO_CACHE_DIR=1 \\\n    PATH=/opt/venv/bin:$PATH MODELS_ROOT=/workspace/models \\\n    DATA_ROOT=/workspace/image-studio-data APP_PORT=5000 COMFY_PORT=8188 \\\n    COMFY_INTERNAL_PORT=8189 BOOTSTRAP_MODELS=0 \\\n    MODEL_GROUPS=sdxl,character,pose,segmentation \\\n    HF_HUB_DISABLE_TELEMETRY=1 DO_NOT_TRACK=1\nRUN apt-get update && apt-get install -y --no-install-recommends \\\n    python3 python3-venv python3-dev build-essential git ca-certificates \\\n    libgl1 libglib2.0-0 libgomp1 ffmpeg nginx openssl tini \\\n    && rm -rf /var/lib/apt/lists/* \\\n    && python3 -m venv /opt/venv\nCOPY torch-constraints.txt build-constraints.txt character-requirements.txt requirements-app.txt /opt/build/\nRUN python -m pip install --upgrade pip \\\n    && python -m pip install --index-url https://download.pytorch.org/whl/cu128 \\\n       -r /opt/build/torch-constraints.txt\nCOPY nodes.lock.json build_nodes.py /opt/build/\nRUN python /opt/build/build_nodes.py --root /opt/ComfyUI --lock /opt/build/nodes.lock.json \\\n    --constraints /opt/build/build-constraints.txt \\\n    && python -m pip install -c /opt/build/build-constraints.txt \\\n       -r /opt/build/character-requirements.txt -r /opt/build/requirements-app.txt \\\n    && python -m pip check\nWORKDIR /opt/image-studio\n# COPY ระบุไฟล์ชัดเจน ป้องกัน config.env/state/ภาพส่วนตัวติดเข้า container\nCOPY app.py core.py engine.py index.html install_models.py model_catalog.py \\\n     runtime_init.py entrypoint.sh extra_model_paths.yaml /opt/image-studio/\nRUN python -m compileall -q /opt/image-studio \\\n    && chmod 755 /opt/image-studio/entrypoint.sh\nEXPOSE 5000 8188\nHEALTHCHECK --interval=20s --timeout=5s --start-period=10m --retries=3 \\\n    CMD python -c \"import json,os,urllib.request; u='http://127.0.0.1:'+os.getenv('APP_PORT','5000')+'/healthz'; r=json.load(urllib.request.build_opener(urllib.request.ProxyHandler({})).open(u,timeout=4)); assert r.get('ready') is True\"\nENTRYPOINT [\"/usr/bin/tini\",\"--\",\"/opt/image-studio/entrypoint.sh\"]\nCMD []\n", "build_nodes.py": "\"\"\"Install pinned code/dependencies during Docker build; never fetch model weights.\"\"\"\nimport argparse\nimport json\nfrom pathlib import Path\nimport re\nimport subprocess\nimport sys\n\n\ndef clone(entry, path):\n    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', entry['repo']):\n        raise ValueError('ชื่อ repository ไม่ถูกต้อง')\n    if not re.fullmatch(r'[a-f0-9]{40}', entry['commit']):\n        raise ValueError('ต้องระบุ commit เต็มเพื่อทำซ้ำได้')\n    # ใช้ source จากเจ้าของโครงการ ไม่รัน install.py ที่อาจดึงโมเดลระหว่าง build\n    subprocess.run(['git', 'init', str(path)], check=True)\n    subprocess.run(['git', '-C', str(path), 'remote', 'add', 'origin', 'https://github.com/' + entry['repo'] + '.git'], check=True)\n    subprocess.run(['git', '-C', str(path), 'fetch', '--depth', '1', 'origin', entry['commit']], check=True)\n    subprocess.run(['git', '-C', str(path), 'checkout', '--detach', 'FETCH_HEAD'], check=True)\n    actual = subprocess.check_output(['git', '-C', str(path), 'rev-parse', 'HEAD'], text=True).strip()\n    if actual != entry['commit']:\n        raise ValueError('commit ที่ติดตั้งไม่ตรงกับ lock')\n\n\ndef install_requirements(path, constraints):\n    requirements = path / 'requirements.txt'\n    if requirements.is_file():\n        # สองแพ็กเกจนี้ใช้ namespace เดียวกัน จึงติดตั้งเฉพาะรุ่นเดิมที่เข้ากันได้\n        lines = requirements.read_text(encoding='utf-8').splitlines()\n        normalized = [\n            'albumentations==2.0.8' if line.strip() == 'albumentationsx' else line\n            for line in lines\n        ]\n        if normalized != lines:\n            requirements = path / 'requirements.image-studio.txt'\n            requirements.write_text('\\n'.join(normalized) + '\\n', encoding='utf-8')\n            print('Packaging compatibility: albumentationsx -> albumentations==2.0.8', flush=True)\n        subprocess.run([sys.executable, '-m', 'pip', 'install', '-c', str(constraints), '-r', str(requirements)], check=True)\n\n\ndef main():\n    p = argparse.ArgumentParser()\n    p.add_argument('--root', type=Path, required=True)\n    p.add_argument('--lock', type=Path, required=True)\n    p.add_argument('--constraints', type=Path, required=True)\n    args = p.parse_args()\n    lock = json.loads(args.lock.read_text(encoding='utf-8'))\n    clone(lock['comfy'], args.root)\n    install_requirements(args.root, args.constraints)\n    for entry in lock['nodes']:\n        if not re.fullmatch(r'[A-Za-z0-9_.-]+', entry['directory']):\n            raise ValueError('ชื่อโฟลเดอร์ node ไม่ถูกต้อง')\n        path = args.root / 'custom_nodes' / entry['directory']\n        clone(entry, path)\n        install_requirements(path, args.constraints)\n    # ย้ายเพียงโครง placeholder ที่มากับ Git ภายใน image ไม่แตะ Network Volume\n    models = args.root / 'models'\n    if models.exists():\n        for file in models.rglob('*'):\n            if file.is_file() and file.suffix.lower() in ('.safetensors', '.ckpt', '.pt', '.pth', '.onnx', '.bin'):\n                raise ValueError('พบโมเดลใน source ระหว่าง build จึงหยุดก่อนแพ็ก image')\n        models.rename(args.root / 'model-path-reference')\n\n\nif __name__ == '__main__':\n    main()\n", "build-constraints.txt": "# จำกัดเฉพาะตอนติดตั้ง ไม่เปลี่ยน workflow หรือโมเดลของแอป\n-c torch-constraints.txt\nalbumentations==2.0.8\nalbucore==0.0.24\n\n# Manager ต้องใช้ chardet รุ่นที่ Requests เดิมรองรับ\nchardet==5.2.0\n", "tests/test_build_nodes.py": "\"\"\"ตรวจการแก้ dependency โดยไม่รัน pip หรือเปลี่ยน source ของส่วนเสริม\"\"\"\nimport tempfile\nimport unittest\nfrom pathlib import Path\nfrom unittest.mock import patch\n\nimport build_nodes\n\n\nclass BuildRequirementsTest(unittest.TestCase):\n    def test_aux_namespace_collision_is_normalized(self):\n        with tempfile.TemporaryDirectory() as folder:\n            root = Path(folder)\n            original = 'torch\\nalbumentationsx\\n# keep comment\\n'\n            (root / 'requirements.txt').write_text(original, encoding='utf-8')\n            with patch('build_nodes.subprocess.run') as run:\n                build_nodes.install_requirements(root, root / 'constraints.txt')\n            generated = root / 'requirements.image-studio.txt'\n            self.assertEqual(generated.read_text(encoding='utf-8'), 'torch\\nalbumentations==2.0.8\\n# keep comment\\n')\n            self.assertEqual((root / 'requirements.txt').read_text(encoding='utf-8'), original)\n            self.assertEqual(run.call_args.args[0][-1], str(generated))\n            self.assertTrue(run.call_args.kwargs['check'])\n\n    def test_other_requirements_are_passed_through(self):\n        with tempfile.TemporaryDirectory() as folder:\n            root = Path(folder)\n            original = 'albumentations>=1.4.16\\nrequests\\n'\n            (root / 'requirements.txt').write_text(original, encoding='utf-8')\n            with patch('build_nodes.subprocess.run') as run:\n                build_nodes.install_requirements(root, root / 'constraints.txt')\n            self.assertEqual(run.call_args.args[0][-1], str(root / 'requirements.txt'))\n            self.assertFalse((root / 'requirements.image-studio.txt').exists())\n\n\nif __name__ == '__main__':\n    unittest.main()\n"}''')
+          assert set(files)=={'Dockerfile','build_nodes.py','build-constraints.txt','tests/test_build_nodes.py'}
+          for name,text in files.items():
+              (root/name).write_text(text,encoding='utf-8')
+          patch=json.loads(r'''{"old_tail": "    'cas-bridge.xethub.hf.co', 'cdn-lfs.hf.co'}\n", "new_tail": "    'cas-bridge.xethub.hf.co', 'cdn-lfs.hf.co',\n    # CDN ทางการรุ่นใหม่: อนุญาตเฉพาะ redirect และยังตรวจ SHA256 ทุกไฟล์\n    'us.aws.cdn.hf.co', 'us.gcp.cdn.hf.co'}\n", "installer_sha256": "ce303878d58ca8c112cfe5fdff2c25601431572919236a94837636e5f1332a3e", "tests_anchor": "    def test_unapproved_host_and_credentials_blocked(self):\n", "new_tests": "    def test_current_hf_cdn_redirect_does_not_receive_token(self):\n        # รองรับ CDN ปัจจุบันโดยไม่ส่ง token ข้าม host\n        for host in ('us.aws.cdn.hf.co', 'us.gcp.cdn.hf.co'):\n            with self.subTest(host=host):\n                redirect = Response(status=302, headers={'Location': 'https://' + host + '/model?signature=private'})\n                final = Response()\n                session = Session(redirect, final)\n                self.assertIs(installer.http_stream(session, URL, token='private-token'), final)\n                final.close()\n                self.assertTrue(redirect.closed)\n                self.assertEqual(session.calls[0][2]['headers']['Authorization'], 'Bearer private-token')\n                self.assertNotIn('Authorization', session.calls[1][2]['headers'])\n                self.assertNotIn('signature=private', self.output.getvalue() + self.errors.getvalue())\n\n    def test_current_hf_cdn_not_allowed_as_initial_publisher(self):\n        for host in ('us.aws.cdn.hf.co', 'us.gcp.cdn.hf.co'):\n            session = Session()\n            with self.assertRaises(installer.InstallError):\n                installer.http_stream(session, 'https://' + host + '/model')\n            self.assertEqual(session.calls, [])\n\n    def test_current_hf_cdn_deceptive_redirects_blocked(self):\n        for url in ('http://us.aws.cdn.hf.co/model', 'https://us.aws.cdn.hf.co:80/model',\n                    'https://us.aws.cdn.hf.co.evil.example/model',\n                    'https://us.aws.cdn.hf.co@evil.example/model',\n                    'https://user:password@us.aws.cdn.hf.co/model'):\n            with self.subTest(url=url):\n                redirect = Response(status=302, headers={'Location': url})\n                session = Session(redirect)\n                with self.assertRaises(installer.InstallError):\n                    installer.http_stream(session, URL)\n                self.assertTrue(redirect.closed)\n                self.assertEqual(len(session.calls), 1)\n\n    def test_current_hf_cdn_still_checks_download_hash(self):\n        responses = []\n        for _ in range(3):\n            responses += [Response(status=302, headers={'Location': 'https://us.aws.cdn.hf.co/model'}),\n                          Response(b'badbad')]\n        item = entry()\n        session = Session(*responses)\n        self.assertEqual(self.install([item], session)['sample'], 'failed')\n        self.assertFalse(self.target(item).exists())\n        self.assertEqual(len(session.calls), 6)\n\n    def test_hf_cdn_multihop_never_receives_token(self):\n        session = Session(Response(status=302, headers={'Location': 'https://cas-bridge.xethub.hf.co/model'}),\n                          Response(status=307, headers={'Location': 'https://us.aws.cdn.hf.co/model'}), Response())\n        installer.http_stream(session, URL, token='private-token').close()\n        for _, _, kwargs in session.calls[1:]:\n            self.assertNotIn('Authorization', kwargs['headers'])\n\n", "tests_sha256": "b2931db4750531e6d8c7a2b7a469c84f7911584c55305621751d40e8ec0e82d6"}''')
+          installer=root/'install_models.py'
+          original=installer.read_text(encoding='utf-8')
+          assert original.count(patch['old_tail'])==1 and patch['new_tail'] not in original, 'Installer patch anchor mismatch'
+          installer.write_text(original.replace(patch['old_tail'],patch['new_tail'],1),encoding='utf-8')
+          assert hashlib.sha256(installer.read_bytes()).hexdigest()==patch['installer_sha256'], 'Repaired installer differs from reviewed source'
+          test_file=root/'tests/test_install_models.py'
+          original=test_file.read_text(encoding='utf-8')
+          assert original.count(patch['tests_anchor'])==1
+          assert 'def test_current_hf_cdn_redirect_does_not_receive_token' not in original, 'CDN regression tests already present'
+          assert patch['new_tests'].count('    def test_')==5
+          test_file.write_text(original.replace(patch['tests_anchor'],patch['new_tests']+patch['tests_anchor'],1),encoding='utf-8')
+          assert hashlib.sha256(test_file.read_bytes()).hexdigest()==patch['tests_sha256'], 'Regression tests differ from reviewed source'
+          for name,checksum in protected.items():
+              assert hashlib.sha256((root/name).read_bytes()).hexdigest()==checksum, 'Original application changed: '+name
+          root.rename('repair-src')
+          context=Path('repair-context')
+          context.mkdir()
+          (context/'install_models.py').write_bytes(Path('repair-src/install_models.py').read_bytes())
+          (context/'Dockerfile.repair').write_text('FROM ghcr.io/itmethx-bot/motion-studio-image@sha256:46adc4d4eb655caf587ee1300b62d091802e87dd2912a9abe4daa71d7fcec66f\nCOPY install_models.py /opt/image-studio/install_models.py\n',encoding='utf-8')
+          assert set(p.name for p in context.iterdir())=={'install_models.py','Dockerfile.repair'}
+          print('Original archive verified; only reviewed CDN installer fix will be added to the immutable image.')
+          PYCODE
+      - name: Build minimal repair layer from immutable image
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          VERSION="runpod-original-cdn-${GITHUB_SHA}"
+          docker build --platform linux/amd64 \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --file repair-context/Dockerfile.repair --tag "$IMAGE:$VERSION" repair-context
+          printf 'IMAGE=%s\nVERSION=%s\n' "$IMAGE" "$VERSION" >> "$GITHUB_ENV"
+      - name: Verify image installer and run all 87 offline Linux tests
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python "$IMAGE:$VERSION" -B -c 'import hashlib,pathlib; assert hashlib.sha256(pathlib.Path("/opt/image-studio/install_models.py").read_bytes()).hexdigest()=="ce303878d58ca8c112cfe5fdff2c25601431572919236a94837636e5f1332a3e"; print("Image installer SHA256 verified")'
+          docker run --rm --entrypoint python \
+            --mount "type=bind,source=$PWD/repair-src,target=/test-source,readonly" \
+            --workdir /test-source "$IMAGE:$VERSION" -B -c 'import sys,unittest; suite=unittest.defaultTestLoader.discover("tests",pattern="test_*.py"); assert suite.countTestCases()==87, "Expected 87 offline tests"; sys.exit(0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1)'
+      - name: Probe all 36 starter downloads with HEAD only
+        run: |
+          set -euo pipefail
+          docker run --rm -i --entrypoint python --workdir /opt/image-studio "$IMAGE:$VERSION" -B - <<'PYCODE'
+          from concurrent.futures import ThreadPoolExecutor
+          from urllib.parse import urlsplit
+          import requests
+          import install_models
+          from model_catalog import select_models
+          entries=select_models(['sdxl','character','pose','segmentation'])
+          assert len(entries)==36
+          def probe(entry):
+              # ตรวจเฉพาะ header ไม่โหลด weight และไม่อ่าน/ส่ง HF token
+              with requests.Session() as session:
+                  session.trust_env=False
+                  try:
+                      response=install_models.http_stream(session,entry['url'],token=None,method='HEAD')
+                      try:
+                          status=response.status_code
+                          hostname=urlsplit(response.url).hostname
+                          print(entry['id'],status,hostname,flush=True)
+                          return status in (200,206)
+                      finally:
+                          response.close()
+                  except Exception as exc:
+                      # ห้ามพิมพ์ signed URL/query หรือ credentials ลง log
+                      print(entry['id'],'ERROR',type(exc).__name__,flush=True)
+                      return False
+          with ThreadPoolExecutor(max_workers=4) as pool:
+              successful=list(pool.map(probe,entries))
+          assert all(successful), 'One or more starter HEAD probes failed; image will not be published'
+          PYCODE
+      - name: Publish separately tagged repair image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$VERSION"
+          REFERENCE="$(docker image inspect "$IMAGE:$VERSION" --format '{{index .RepoDigests 0}}')"
+          [[ "$REFERENCE" =~ ^ghcr.io/.+@sha256:[a-f0-9]{64}$ ]]
+          printf '## Original Text-to-Image CDN repair\n\n`%s`\n\nImmutable original image plus only the reviewed model-download CDN allowlist fix. All 87 offline Linux tests and 36 public HEAD probes passed. No model bodies downloaded by probes; no RunPod resources created. GPU inference remains unverified.\n' "$REFERENCE" >> "$GITHUB_STEP_SUMMARY"
